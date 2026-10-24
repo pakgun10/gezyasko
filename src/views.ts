@@ -46,7 +46,7 @@ ${msg ? `<div class="flash">${esc(msg)}</div>` : ""}
 <h1>${esc(title)}</h1>
 ${body}
 </main>
-<footer class="foot">GezyAsko — Asesmen Observasi (bukan CBT) · Satu instalasi untuk satu sekolah</footer>
+<footer class="foot">© 2026 GezyTech App · Dikembangkan oleh PakGun · Dilarang menyalin/menduplikat kode tanpa izin tertulis.</footer>
 </body></html>`;
 }
 
