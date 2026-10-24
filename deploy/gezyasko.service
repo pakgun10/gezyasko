@@ -1,0 +1,18 @@
+[Unit]
+Description=GezyAsko - Asesmen Observasi
+After=network.target
+
+[Service]
+Type=simple
+# Sesuaikan User, WorkingDirectory, dan DATA_DIR dengan VPS Anda.
+User=gezyasko
+WorkingDirectory=/opt/gezyasko/gezyasko-app
+Environment=PORT=3000
+Environment=DATA_DIR=/opt/gezyasko/data
+Environment=COOKIE_SECURE=1
+ExecStart=/home/gezyasko/.bun/bin/bun run src/index.ts
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
