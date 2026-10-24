@@ -1274,6 +1274,13 @@ export function buildRoutes(app: Hono, s: AppState): void {
       ${field("Kata sandi awal (min. 6)", `<input type="password" name="password" required>`)}
       <button class="btn" type="submit">Buat akun pengamat</button>
     </form>
+    <form method="post" action="/admin/guru/reset" class="card">
+      ${csrfInput(cur.csrf)}
+      <p><b>Reset kata sandi pengguna</b> — untuk pengguna yang lupa kata sandinya. Semua sesi pengguna itu akan dicabut, ia harus login dengan kata sandi baru lalu menggantinya sendiri. Reset akun sendiri tidak diizinkan; gunakan Ganti Kata Sandi untuk akun sendiri. Aksi reset dicatat di audit log tanpa mencatat kata sandinya.</p>
+      ${field("Pengguna", select("user_id", users.filter((u: any) => u.id !== cur.user.id).map((u: any) => ({ value: String(u.id), label: `${u.username} — ${u.name} (${u.role})` }))))}
+      ${field("Kata sandi baru (min. 6)", `<input type="password" name="password" required>`)}
+      <button class="btn" type="submit">Reset kata sandi</button>
+    </form>
     ${table(["Username", "Nama", "Peran", "Kepsek?", "Terikat murid"], users.map((u) => [esc(u.username), esc(u.name), esc(u.role), u.can_view_all ? "Ya" : "Tidak", u.student_id ? String(u.student_id) : "-"]))}${backLink("/admin")}`;
     return page(s, c, cur.user, "Guru & Akun", body);
   });
@@ -1350,6 +1357,25 @@ export function buildRoutes(app: Hono, s: AppState): void {
       return redirectMsg(c, "/admin/guru", "NIS sudah dipakai sebagai username atau murid sudah terikat akun lain.");
     }
     return redirectMsg(c, "/admin/guru", `Akun pengamat dibuat dengan username = NIS ${st.student_no}.`);
+  });
+
+  app.post("/admin/guru/reset", async (c) => {
+    const cur = requireAdmin(s, c);
+    if (cur instanceof Response) return cur;
+    const body = await formOf(c);
+    if (!checkCsrf(db(), c, body)) return errPage(s, c, cur.user, "Gagal", "Token keamanan tidak valid.", "/admin");
+    const targetId = Number(str(body, "user_id"));
+    const password = strRaw(body, "password");
+    if (!targetId) return redirectMsg(c, "/admin/guru", "Pengguna tidak ditemukan.");
+    if (targetId === cur.user.id) return redirectMsg(c, "/admin/guru", "Reset kata sandi akun sendiri tidak diizinkan; gunakan Ganti Kata Sandi.");
+    if (password.length < 6) return redirectMsg(c, "/admin/guru", "Kata sandi minimal 6 karakter.");
+    const target = db().query("SELECT * FROM users WHERE id = ?").get(targetId) as any;
+    if (!target) return redirectMsg(c, "/admin/guru", "Pengguna tidak ditemukan.");
+    const hash = await Bun.password.hash(password, { algorithm: "argon2id" });
+    db().query("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?").run(hash, targetId);
+    db().query("DELETE FROM user_sessions WHERE user_id = ?").run(targetId);
+    audit(db(), cur.user.id, "password.reset", "users", targetId, {});
+    return redirectMsg(c, "/admin/guru", `Kata sandi ${target.username} berhasil di-reset; semua sesinya dicabut dan ia wajib mengganti kata sandi saat login pertama.`);
   });
 
   app.get("/admin/kelompok", (c) => {
