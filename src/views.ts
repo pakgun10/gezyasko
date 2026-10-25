@@ -124,7 +124,8 @@ export function csrfInput(csrf: string): string {
 
 export function table(headers: string[], rows: string[][]): string {
   const th = headers.map((h) => `<th>${esc(h)}</th>`).join("");
-  const tr = rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("");
+  // data-label dipakai CSS kartu di HP: tiap sel menampilkan nama kolomnya.
+  const tr = rows.map((r) => `<tr>${r.map((c, i) => `<td data-label="${esc(headers[i] ?? "")}">${c}</td>`).join("")}</tr>`).join("");
   return `<div class="tablewrap"><table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
 }
 

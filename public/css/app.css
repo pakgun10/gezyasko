@@ -50,6 +50,18 @@ input[type=checkbox],input[type=radio]{width:auto}
 .welcome{display:flex;justify-content:space-between;align-items:center;gap:16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;margin:12px 0}
 .welcome-title{font-size:24px;font-weight:800;margin:0}.welcome-sub{color:#64748b;margin:4px 0 0}.welcome-art{flex-shrink:0}
 @media (max-width:767px){.welcome-art{display:none}}
+/* Tabel jadi kartu di HP (hanya layar, bukan cetak): kepala tabel
+   disembunyikan, tiap baris menjadi kartu, tiap sel menampilkan nama
+   kolomnya dari data-label. Di layar besar dan saat cetak tetap tabel. */
+@media screen and (max-width:767px){
+.tablewrap{overflow-x:visible}
+.tablewrap table,.tablewrap tbody,.tablewrap tr,.tablewrap td{display:block;width:100%}
+.tablewrap thead{display:none}
+.tablewrap tr{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:8px 12px;margin:0 0 12px}
+.tablewrap td{border:0;padding:6px 0;display:flex;gap:8px;align-items:flex-start;overflow-wrap:anywhere}
+.tablewrap td::before{content:attr(data-label);font-weight:700;flex:0 0 40%;color:#334155}
+.tablewrap td[data-label=""]::before{display:none}
+}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin:12px 0}
 .griditem{display:block;background:#fff;border:2px solid #e2e8f0;border-radius:12px;padding:14px;text-decoration:none;color:#0f172a}
 .griditem span{display:block;color:#64748b;font-size:14px}.griditem.done{border-color:#86efac;background:#f0fdf4}

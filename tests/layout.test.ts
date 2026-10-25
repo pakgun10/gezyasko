@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { layout } from "../src/views";
+import { readFileSync } from "node:fs";
+import { layout, table } from "../src/views";
 
 const admin: any = { id: 1, username: "admin", name: "Admin", role: "admin", active: 1 };
 
@@ -31,6 +32,18 @@ describe("tata letak sidebar + navigasi bawah", () => {
     expect(css).not.toBeNull();
     expect(html).toContain(`/static/js/catat.js?v=${css![1]}`);
     expect(html).toContain(`/static/js/level-builder.js?v=${css![1]}`);
+  });
+  test("tabel memakai data-label per kolom untuk kartu HP", () => {
+    const html = table(["Judul", "Jenis", "Aksi"], [["Senam", "rubrik", `<a href="/x">Edit</a>`]]);
+    expect(html).toContain('<td data-label="Judul">Senam</td>');
+    expect(html).toContain('<td data-label="Jenis">rubrik</td>');
+    expect(html).toContain('<td data-label="Aksi"><a href="/x">Edit</a></td>');
+  });
+  test("CSS memuat aturan tabel-jadi-kartu hanya untuk layar kecil", () => {
+    const css = readFileSync(new URL("../public/css/app.css", import.meta.url), "utf8");
+    expect(css).toContain("@media screen and (max-width:767px)");
+    expect(css).toContain(".tablewrap td::before");
+    expect(css).toContain("content:attr(data-label)");
   });
   test("pengguna non-admin tidak mendapat tautan Admin", () => {
     const guru: any = { ...admin, role: "guru" };
