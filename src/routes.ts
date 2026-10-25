@@ -27,7 +27,7 @@ import {
 import { esc, layout, field, input, select, csrfInput, table, backLink } from "./views";
 import { createSession, snapshotInstrument, audit, seedTemplates } from "./db";
 import { parseLevels, hasRanges, scaleForLevels, validateLevels, levelForValueInRange, fmt, fmtDual, trendSvg, trendPoints } from "./lib/scores";
-import { validateScore, parseScoreInput, effectiveLevels, resolveRubricScore } from "./lib/validate";
+import { validateScore, parseScoreInput, effectiveLevels, resolveRubricScore, descriptorsFromFields } from "./lib/validate";
 import { parseCSV, tableFromCSV, validateStudentRows, validateTeacherRows, validateGroupRows } from "./lib/csv";
 import { importStudents, importTeachers, importGroups } from "./lib/imports";
 import { generateNarrative } from "./lib/narrative";
@@ -629,15 +629,25 @@ export function buildRoutes(app: Hono, s: AppState): void {
     const cur = requireUser(s, c);
     if (cur instanceof Response) return cur;
     if (cur.user.role === "pengamat") return errPage(s, c, cur.user, "Tidak diizinkan", "Pengamat tidak mengelola instrumen.", "/");
+    const defaultLevels = `[{"v":1,"label":"Belum muncul"},{"v":2,"label":"Mulai muncul"},{"v":3,"label":"Berkembang sesuai harapan"},{"v":4,"label":"Membudaya"}]`;
     const body = `<form method="post" action="/instrumen/baru" class="card">
       ${csrfInput(cur.csrf)}
       ${field("Judul instrumen (bebas)", input("title", "", "required"))}
+      <p class="muted">Contoh: Rubrik Senam Kelas 7, Checklist Keterampilan, Catatan Anekdotal. Judul ini yang tampil di daftar instrumen dan di sesi.</p>
       ${field("Jenis", select("kind", ["rubrik", "checklist", "skala", "anekdotal", "gabungan"].map((k) => ({ value: k, label: k }))))}
-      ${field("Level (JSON, mis. [{\"v\":1,\"label\":\"Belum muncul\"},{\"v\":2,\"label\":\"Mulai muncul\"}])", `<textarea name="levels" rows="4">[{"v":1,"label":"Belum muncul"},{"v":2,"label":"Mulai muncul"},{"v":3,"label":"Berkembang sesuai harapan"},{"v":4,"label":"Membudaya"}]</textarea>`)}
-      <p class="muted">Rubrik pola Aspro: tiap level boleh memakai rentang + nilai awal, mis. [{"v":1,"label":"Kurang kompak","min":0,"max":64,"def":50},{"v":2,"label":"Cukup kompak","min":65,"max":77,"def":71},{"v":3,"label":"Kompak","min":78,"max":89,"def":84},{"v":4,"label":"Sangat kompak","min":90,"max":100,"def":95}]. Bila satu level memakai rentang, semua level wajib memakai rentang dan nilai awal.</p>
+      <p class="muted">Jenis = cara menilai satu instrumen ini secara keseluruhan. Rubrik = pilih tingkat lalu nilai; Checklist = Ya/Belum; Skala = pilih angka level; Anekdotal = tanpa skor, hanya catatan; Gabungan = tiap kriteria boleh beda tipe.</p>
+      <div class="field"><span>Level (tombol penilaian)</span>
+      <div data-level-builder data-levels="${esc(defaultLevels)}">
+        <div data-level-rows></div>
+        <p><button type="button" class="btn secondary" data-preset="paud">Preset: 1–4 (PAUD)</button> <button type="button" class="btn secondary" data-preset="aspro">Preset: Rentang 0–100</button> <button type="button" class="btn secondary" data-add-level>+ Tambah level</button></p>
+        <input type="hidden" name="levels" value="${esc(defaultLevels)}">
+      </div></div>
+      <p class="muted">Setiap baris = satu tombol saat menilai. Label = nama tombolnya. Rentang bawah, rentang atas, dan Nilai awal hanya diisi untuk rubrik pola Aspro; kosongkan ketiganya untuk level biasa (mis. 1–4). Nilai awal = angka yang terisi otomatis saat tombol diklik. Label pada preset bisa diubah, mis. "Baik" menjadi "Kompak". Bila satu level memakai rentang, semua level wajib memakai rentang dan nilai awal.</p>
       ${field("Visibilitas", select("visibility", [{ value: "private", label: "Pribadi" }, { value: "sekolah", label: "Sekolah (semua guru)" }]))}
+      <p class="muted">Pribadi = hanya Anda yang melihat instrumen ini. Sekolah = semua guru bisa melihat dan memakainya di sesi mereka.</p>
       <button class="btn" type="submit">Simpan & kelola kriteria</button>
-    </form>`;
+    </form>
+    <p class="muted">Langkah selanjutnya setelah simpan: tambah kriteria di halaman edit, lalu buat sesi dan mulai menilai.</p>`;
     return page(s, c, cur.user, "Buat Instrumen", body);
   });
 
@@ -674,11 +684,22 @@ export function buildRoutes(app: Hono, s: AppState): void {
     const criteria = db().query("SELECT * FROM criteria WHERE instrument_id = ? ORDER BY sort ASC, id ASC").all(id) as any[];
     const frameworks = visibleFrameworks(db(), cur.user);
     const goals = db().query("SELECT g.*, f.title AS fw_title FROM goals g JOIN frameworks f ON f.id = g.framework_id ORDER BY f.title, g.sort").all() as any[];
+    const editLevels = parseLevels(inst.levels);
+    const descriptorFields = editLevels.length
+      ? editLevels.map((lv) => field(`Deskriptor untuk ${lv.label} (${typeof lv.min === "number" && typeof lv.max === "number" ? `${lv.min}–${lv.max}` : `posisi ${lv.v}`})`, `<textarea name="desc_${lv.v}" rows="2"></textarea>`)).join("")
+      : field("Deskriptor per level (JSON, mis. {\"1\":\"...\",\"2\":\"...\"})", `<textarea name="descriptors" rows="3">{}</textarea>`);
     const body = `<form method="post" action="/instrumen/${id}/edit" class="card">
       ${csrfInput(cur.csrf)}
       ${field("Judul", input("title", inst.title, "required"))}
       ${field("Jenis", select("kind", ["rubrik", "checklist", "skala", "anekdotal", "gabungan"].map((k) => ({ value: k, label: k, selected: k === inst.kind }))))}
-      ${field("Level (JSON)", `<textarea name="levels" rows="4">${esc(inst.levels)}</textarea>`)}
+      <p class="muted">Jenis = cara menilai satu instrumen ini secara keseluruhan. Untuk instrumen bukan gabungan, tipe tiap kriteria harus sama dengan jenis ini (atau teks untuk catatan).</p>
+      <div class="field"><span>Level (tombol penilaian)</span>
+      <div data-level-builder data-levels="${esc(inst.levels)}">
+        <div data-level-rows></div>
+        <p><button type="button" class="btn secondary" data-preset="paud">Preset: 1–4 (PAUD)</button> <button type="button" class="btn secondary" data-preset="aspro">Preset: Rentang 0–100</button> <button type="button" class="btn secondary" data-add-level>+ Tambah level</button></p>
+        <input type="hidden" name="levels" value="${esc(inst.levels)}">
+      </div></div>
+      <p class="muted">Setiap baris = satu tombol saat menilai. Tentukan level dulu sebelum menambah kriteria, karena deskriptor kriteria memakai nomor posisi level di sini. Mengubah urutan atau jumlah level setelah kriteria dibuat bisa menggeser deskriptor yang sudah ada.</p>
       ${field("Visibilitas", select("visibility", [{ value: "private", label: "Pribadi", selected: inst.visibility === "private" }, { value: "sekolah", label: "Sekolah", selected: inst.visibility === "sekolah" }]))}
       ${isAdmin(cur.user) ? field("Templat bawaan (hanya admin)", select("is_template", [{ value: "0", label: "Bukan templat", selected: inst.is_template !== 1 }, { value: "1", label: "Templat bawaan", selected: inst.is_template === 1 }])) : ""}
       <button class="btn" type="submit">Simpan instrumen</button>
@@ -698,10 +719,15 @@ export function buildRoutes(app: Hono, s: AppState): void {
     <form method="post" action="/instrumen/${id}/kriteria" class="card">
       ${csrfInput(cur.csrf)}
       ${field("Teks kriteria", input("text", "", "required"))}
+      <p class="muted">Contoh: Kekompakan &amp; Sinkronisasi Gerakan. Satu kriteria = satu hal yang diamati.</p>
       ${field("Tipe input", select("input_type", ["rubrik", "checklist", "skala", "teks"].map((k) => ({ value: k, label: k }))))}
+      <p class="muted">Tipe input = cara mengisi kriteria ini. Rubrik = pilih tingkat lalu nilai; Checklist = Ya/Belum; Skala = pilih angka level; Teks = tanpa skor, hanya catatan.</p>
       ${field("Bobot", `<input type="number" step="0.1" name="weight" value="1">`)}
-      ${field("Deskriptor per level (JSON, mis. {\"1\":\"...\",\"2\":\"...\"})", `<textarea name="descriptors" rows="3">{}</textarea>`)}
+      <p class="muted">Bobot 1 = sama penting dengan kriteria lain. Bobot 2 = dua kali lipat pengaruhnya pada rata-rata.</p>
+      ${descriptorFields}
+      <p class="muted">Deskriptor = kalimat yang menjelaskan apa yang terlihat pada tiap level, mis. untuk Kompak: "Gerakan umumnya serentak, hanya 1–2 momen kurang seragam". Kosongkan bila level itu tidak butuh penjelasan.</p>
       ${field("Tautan tujuan (opsional)", select("goal_id", [{ value: "", label: "— Tanpa tautan —" }, ...goals.map((g: any) => ({ value: String(g.id), label: `${g.fw_title} — ${g.text}` }))]))}
+      <p class="muted">Opsional. Bila ditautkan, kriteria ini ikut dihitung di rekap per tujuan itu. Bila tanpa tautan, kriteria tetap dinilai dan tetap muncul di rekap per kriteria.</p>
       <button class="btn" type="submit">Tambah kriteria</button>
     </form>
     <p class="muted">Mengubah instrumen di sini TIDAK mengubah sesi yang sudah dibuat, karena sesi memakai snapshot kriteria saat sesi dibuat.</p>
@@ -749,11 +775,16 @@ export function buildRoutes(app: Hono, s: AppState): void {
       return redirectMsg(c, `/instrumen/${id}/edit`, "Untuk instrumen bukan gabungan, tipe kriteria harus sama dengan jenis instrumen (atau teks untuk catatan).");
     }
     let descriptors = "{}";
-    try {
-      const parsed = JSON.parse(strRaw(body, "descriptors") || "{}");
-      descriptors = JSON.stringify(parsed);
-    } catch {
-      return redirectMsg(c, `/instrumen/${id}/edit`, "Deskriptor harus berupa JSON objek yang valid.");
+    const fromFields = descriptorsFromFields(body);
+    if (fromFields !== null) {
+      descriptors = fromFields;
+    } else {
+      try {
+        const parsed = JSON.parse(strRaw(body, "descriptors") || "{}");
+        descriptors = JSON.stringify(parsed);
+      } catch {
+        return redirectMsg(c, `/instrumen/${id}/edit`, "Deskriptor harus berupa JSON objek yang valid.");
+      }
     }
     const maxSort = (db().query("SELECT COALESCE(MAX(sort),0) m FROM criteria WHERE instrument_id = ?").get(id) as any).m;
     db().query("INSERT INTO criteria (instrument_id, goal_id, text, descriptors, weight, input_type, sort) VALUES (?, ?, ?, ?, ?, ?, ?)").run(

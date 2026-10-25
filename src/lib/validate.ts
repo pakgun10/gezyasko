@@ -51,6 +51,26 @@ export function parseScoreInput(raw: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Kumpulkan deskriptor per level dari kolom formulir desc_<posisi>.
+ * Mengembalikan JSON string bila ada satu pun kolom desc_, atau null
+ * bila formulir memakai kolom JSON lama (fallback di route).
+ * Nilai kosong diabaikan, sehingga level tanpa penjelasan tidak
+ * mendapat deskriptor.
+ */
+export function descriptorsFromFields(body: Record<string, any>): string | null {
+  const keys = Object.keys(body).filter((k) => k.startsWith("desc_"));
+  if (!keys.length) return null;
+  const obj: Record<string, string> = {};
+  for (const k of keys) {
+    const v = k.slice("desc_".length);
+    const raw = body[k];
+    const val = typeof raw === "string" ? raw.trim() : Array.isArray(raw) && typeof raw[0] === "string" ? raw[0].trim() : "";
+    if (val) obj[v] = val;
+  }
+  return JSON.stringify(obj);
+}
+
 export type RubricScore = { value: number; level: number };
 
 /**

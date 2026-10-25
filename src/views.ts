@@ -38,6 +38,7 @@ export function layout(opts: {
 <script src="/static/js/htmx.min.js" defer></script>
 <script src="/static/js/catat.js" defer></script>
 <script src="/static/js/kompres-foto.js" defer></script>
+<script src="/static/js/level-builder.js" defer></script>
 </head><body>
 <header class="sitehead ${print ? "print-only-head" : ""}"><div class="brand">GezyAsko</div><div class="school">${esc(schoolName)}</div></header>
 ${nav}

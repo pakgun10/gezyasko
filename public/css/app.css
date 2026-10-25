@@ -33,3 +33,7 @@ input[type=checkbox],input[type=radio]{width:auto}
 .ttd{display:flex;justify-content:space-between;margin-top:36px}
 @media print{body{background:#fff}.topnav,.foot,.noprint,.sitehead{display:none!important}.wrap{max-width:none;padding:0}.printsheet{border:0}}
 @media (max-width:600px){.navuser{margin-left:0}.grid{grid-template-columns:1fr 1fr}}
+.level-row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;align-items:center}
+.level-row input{flex:1;min-width:110px}
+.level-row input.level-label{flex:2;min-width:160px}
+.level-row .level-del{padding:8px 12px}
