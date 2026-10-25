@@ -19,19 +19,55 @@ export function layout(opts: {
   body: string;
   msg?: string | null;
   print?: boolean;
+  currentPath?: string;
 }): string {
-  const { title, user, schoolName, body, msg, print } = opts;
-  const nav = user
-    ? `<nav class="topnav">
-        <a href="/">Dasbor</a>
-        <a href="/instrumen">Instrumen</a>
-        <a href="/kerangka">Kerangka</a>
-        ${user.role === "admin" ? `<a href="/admin">Admin</a>` : ""}
-        <span class="navuser">${esc(user.name)} (${esc(user.role)})</span>
-        <a href="/ganti-sandi">Ganti Sandi</a>
-        <form method="post" action="/logout" class="inline"><button class="linkbtn" type="submit">Keluar</button></form>
-      </nav>`
-    : "";
+  const { title, user, schoolName, body, msg, print, currentPath = "" } = opts;
+  const active = (href: string): string => {
+    if (!currentPath) return "";
+    if (href === "/") return currentPath === "/" ? " active" : "";
+    return currentPath === href || currentPath.startsWith(`${href}/`) ? " active" : "";
+  };
+  const main = `<main class="wrap">
+${msg ? `<div class="flash">${esc(msg)}</div>` : ""}
+<h1>${esc(title)}</h1>
+${body}
+</main>
+<footer class="foot"><div>© 2026 GezyTech App · Dikembangkan oleh PakGun</div><div>Aplikasi Asesmen Kurikuler</div></footer>`;
+  // Tata letak: sidebar di laptop/desktop, bar atas + navigasi bawah
+  // di HP/tablet. Tanpa lonceng (tidak ada notifikasi di aplikasi ini).
+  // Footer tetap dua baris yang sudah disetujui, disembunyikan saat cetak.
+  const app = user
+    ? `<div class="app">
+  <aside class="sidebar">
+    <div class="side-brand"><div class="brand">GezyAsko</div><div class="school">${esc(schoolName)}</div></div>
+    <nav class="sidenav">
+      <a class="sidelink${active("/")}" href="/">🏠 Dasbor</a>
+      <a class="sidelink${active("/instrumen")}" href="/instrumen">📋 Instrumen</a>
+      <a class="sidelink${active("/kerangka")}" href="/kerangka">🗂️ Kerangka</a>
+      ${user.role === "admin" ? `<a class="sidelink${active("/admin")}" href="/admin">⚙️ Admin</a>` : ""}
+    </nav>
+    <div class="side-user">
+      <div class="side-username"><b>${esc(user.name)}</b><span>${esc(user.role)}</span></div>
+      <a href="/ganti-sandi">🔑 Ganti Sandi</a>
+      <form method="post" action="/logout"><button class="linkbtn" type="submit">🚪 Keluar</button></form>
+    </div>
+  </aside>
+  <div class="maincol">
+    <header class="topbar">
+      <div><div class="brand">GezyAsko</div><div class="school">${esc(schoolName)}</div></div>
+      <details class="account"><summary>👤 ${esc(user.name)}</summary><div class="account-menu"><a href="/ganti-sandi">Ganti Sandi</a><form method="post" action="/logout"><button class="linkbtn" type="submit">Keluar</button></form></div></details>
+    </header>
+    ${main}
+    <nav class="bottomnav">
+      <a class="bottomlink${active("/")}" href="/">🏠<span>Dasbor</span></a>
+      <a class="bottomlink${active("/instrumen")}" href="/instrumen">📋<span>Instrumen</span></a>
+      <a class="bottomlink${active("/kerangka")}" href="/kerangka">🗂️<span>Kerangka</span></a>
+      ${user.role === "admin" ? `<a class="bottomlink${active("/admin")}" href="/admin">⚙️<span>Admin</span></a>` : ""}
+    </nav>
+  </div>
+</div>`
+    : `<header class="sitehead${print ? " print-only-head" : ""}"><div class="brand">GezyAsko</div><div class="school">${esc(schoolName)}</div></header>
+${main}`;
   return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)} — GezyAsko</title>
 <link rel="stylesheet" href="/static/css/app.css">
@@ -40,14 +76,7 @@ export function layout(opts: {
 <script src="/static/js/kompres-foto.js" defer></script>
 <script src="/static/js/level-builder.js" defer></script>
 </head><body>
-<header class="sitehead ${print ? "print-only-head" : ""}"><div class="brand">GezyAsko</div><div class="school">${esc(schoolName)}</div></header>
-${nav}
-<main class="wrap">
-${msg ? `<div class="flash">${esc(msg)}</div>` : ""}
-<h1>${esc(title)}</h1>
-${body}
-</main>
-<footer class="foot"><div>© 2026 GezyTech App · Dikembangkan oleh PakGun</div><div>Aplikasi Asesmen Kurikuler</div></footer>
+${app}
 </body></html>`;
 }
 

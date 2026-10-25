@@ -95,7 +95,7 @@ function requireUser(s: AppState, c: Ctx): { user: User; csrf: string } | Respon
 }
 
 function page(s: AppState, c: Ctx, user: User, title: string, body: string, print = false) {
-  return c.html(layout({ title, user, schoolName: schoolName(s.db), body, msg: msgOf(c), print }));
+  return c.html(layout({ title, user, schoolName: schoolName(s.db), body, msg: msgOf(c), print, currentPath: c.req.path }));
 }
 
 function errPage(s: AppState, c: Ctx, user: User | null, title: string, message: string, back = "/") {
@@ -209,10 +209,10 @@ export function buildRoutes(app: Hono, s: AppState): void {
       };
       const classes = db().query("SELECT cl.*, p.name AS period_name FROM classes cl LEFT JOIN periods p ON p.id = cl.period_id ORDER BY cl.id DESC").all() as any[];
       body = `<div class="cards">
-        <div class="stat"><b>${counts.guru}</b><span>Guru</span></div>
-        <div class="stat"><b>${counts.murid}</b><span>Murid</span></div>
-        <div class="stat"><b>${counts.kelas}</b><span>Kelas</span></div>
-        <div class="stat"><b>${counts.sesi}</b><span>Sesi observasi</span></div></div>
+        <div class="stat"><span class="stat-icon">👤</span><div><b>${counts.guru}</b><span>Guru</span></div></div>
+        <div class="stat"><span class="stat-icon">👥</span><div><b>${counts.murid}</b><span>Murid</span></div></div>
+        <div class="stat"><span class="stat-icon">🏫</span><div><b>${counts.kelas}</b><span>Kelas</span></div></div>
+        <div class="stat"><span class="stat-icon">📋</span><div><b>${counts.sesi}</b><span>Sesi observasi</span></div></div></div>
         <p><a class="btn" href="/admin">Buka Admin</a> <a class="btn secondary" href="/instrumen">Instrumen</a></p>
         <h2>Daftar kelas</h2>
         <ul>${classes.map((cl) => `<li><a href="/kelas/${cl.id}">${esc(cl.name)}</a> ${cl.level_label ? `(${esc(cl.level_label)})` : ""} — ${esc(cl.period_name || "")}</li>`).join("") || "<li>Belum ada kelas.</li>"}</ul>`;
@@ -244,7 +244,10 @@ export function buildRoutes(app: Hono, s: AppState): void {
           <p><a class="btn" href="/murid/${sid}">Profil perkembangan</a> <a class="btn secondary" href="/rekap/murid/${sid}/cetak">Laporan cetak</a></p>`;
       }
     }
-    return page(s, c, u, "Dasbor", body);
+    // Spanduk sambutan dasbor (ilustrasi topi wisuda + buku, SVG inline
+    // tanpa berkas eksternal; disembunyikan di HP lewat CSS).
+    const welcome = `<div class="welcome"><div><p class="welcome-title">Selamat datang di GezyAsko</p><p class="welcome-sub">Aplikasi Asesmen Kurikuler</p></div><svg class="welcome-art" width="96" height="64" viewBox="0 0 96 64" aria-hidden="true"><polygon points="48,4 92,24 48,44 4,24" fill="#0f2a4a"/><rect x="20" y="40" width="26" height="10" rx="2" fill="#1d4ed8"/><rect x="50" y="42" width="26" height="8" rx="2" fill="#0e7490"/><circle cx="88" cy="28" r="3" fill="#f59e0b"/></svg></div>`;
+    return page(s, c, u, "Dasbor", welcome + body);
   });
 
   // ---------- Kelas ----------
