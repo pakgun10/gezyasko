@@ -25,6 +25,13 @@ describe("tata letak sidebar + navigasi bawah", () => {
     expect(html).not.toContain('class="sidebar"');
     expect(html).not.toContain('class="bottomnav"');
   });
+  test("tautan CSS dan JS memakai nomor versi yang sama (cache-busting)", () => {
+    const html = layout({ title: "Dasbor", user: admin, schoolName: "SMP", body: "", currentPath: "/" });
+    const css = html.match(/\/static\/css\/app\.css\?v=([0-9a-f]{8})/);
+    expect(css).not.toBeNull();
+    expect(html).toContain(`/static/js/catat.js?v=${css![1]}`);
+    expect(html).toContain(`/static/js/level-builder.js?v=${css![1]}`);
+  });
   test("pengguna non-admin tidak mendapat tautan Admin", () => {
     const guru: any = { ...admin, role: "guru" };
     const html = layout({ title: "Dasbor", user: guru, schoolName: "SMP", body: "", currentPath: "/" });

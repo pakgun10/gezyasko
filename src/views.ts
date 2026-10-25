@@ -1,7 +1,32 @@
 // Template HTML server (string template, tanpa build step).
 // Semua nilai dari pengguna di-escape sebelum dirender.
 
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import type { User } from "./auth";
+
+// Cache-busting: nomor versi dihitung dari isi berkas public/ saat server
+// start, jadi setiap deploy yang mengubah CSS/JS otomatis meminta browser
+// mengambil berkas baru (URL berbeda), tanpa perlu hard refresh. URL lama
+// yang sudah tercache tidak dipakai lagi.
+function assetVersion(): string {
+  try {
+    const h = createHash("sha256");
+    for (const f of [
+      "../public/css/app.css",
+      "../public/js/htmx.min.js",
+      "../public/js/catat.js",
+      "../public/js/kompres-foto.js",
+      "../public/js/level-builder.js",
+    ]) {
+      h.update(readFileSync(new URL(f, import.meta.url)));
+    }
+    return h.digest("hex").slice(0, 8);
+  } catch {
+    return "1";
+  }
+}
+const ASSET_VERSION = assetVersion();
 
 export function esc(s: unknown): string {
   return String(s ?? "")
@@ -70,11 +95,11 @@ ${body}
 ${main}`;
   return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)} — GezyAsko</title>
-<link rel="stylesheet" href="/static/css/app.css">
-<script src="/static/js/htmx.min.js" defer></script>
-<script src="/static/js/catat.js" defer></script>
-<script src="/static/js/kompres-foto.js" defer></script>
-<script src="/static/js/level-builder.js" defer></script>
+<link rel="stylesheet" href="/static/css/app.css?v=${ASSET_VERSION}">
+<script src="/static/js/htmx.min.js?v=${ASSET_VERSION}" defer></script>
+<script src="/static/js/catat.js?v=${ASSET_VERSION}" defer></script>
+<script src="/static/js/kompres-foto.js?v=${ASSET_VERSION}" defer></script>
+<script src="/static/js/level-builder.js?v=${ASSET_VERSION}" defer></script>
 </head><body>
 ${app}
 </body></html>`;
