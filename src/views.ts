@@ -46,7 +46,7 @@ ${msg ? `<div class="flash">${esc(msg)}</div>` : ""}
 <h1>${esc(title)}</h1>
 ${body}
 </main>
-<footer class="foot">© 2026 GezyTech App · Dikembangkan oleh PakGun · Dilarang menyalin/menduplikat kode tanpa izin tertulis.</footer>
+<footer class="foot"><div>© 2026 GezyTech App · Dikembangkan oleh PakGun</div><div>Aplikasi Asesmen Kurikuler</div></footer>
 </body></html>`;
 }
 
