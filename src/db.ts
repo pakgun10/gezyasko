@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   observed_at TEXT NOT NULL,
   activity TEXT,
   note TEXT,
+  levels_snapshot TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -189,6 +190,7 @@ CREATE TABLE IF NOT EXISTS scores (
   observation_id INTEGER NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
   snapshot_criterion_id INTEGER NOT NULL REFERENCES session_criteria(id),
   value REAL NOT NULL,
+  level_v INTEGER,
   PRIMARY KEY (observation_id, snapshot_criterion_id)
 );
 
@@ -230,12 +232,31 @@ CREATE INDEX IF NOT EXISTS idx_enroll_student ON enrollments(student_id);
 CREATE INDEX IF NOT EXISTS idx_group_member_student ON group_members(student_id);
 `;
 
+/** Migrasi ringan untuk DB yang sudah ada (CREATE TABLE IF NOT EXISTS tidak menambah kolom). */
+export function migrateDb(db: Database): void {
+  const hasColumn = (table: string, column: string): boolean => {
+    try {
+      const rows = db.query(`PRAGMA table_info(${table})`).all() as any[];
+      return rows.some((r) => r.name === column);
+    } catch {
+      return false;
+    }
+  };
+  if (!hasColumn("sessions", "levels_snapshot")) {
+    try { db.exec("ALTER TABLE sessions ADD COLUMN levels_snapshot TEXT"); } catch { /* sudah ada */ }
+  }
+  if (!hasColumn("scores", "level_v")) {
+    try { db.exec("ALTER TABLE scores ADD COLUMN level_v INTEGER"); } catch { /* sudah ada */ }
+  }
+}
+
 export function openDb(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec("PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
+  migrateDb(db);
   db.run("INSERT OR IGNORE INTO settings (id, school_name) VALUES (1, 'Sekolah Saya')");
   return db;
 }
@@ -274,6 +295,13 @@ export function createSession(
       .run(input.class_id, input.instrument_id, input.teacher_id, input.scope, input.observed_at, input.activity || null, input.note || null);
     const sessionId = Number(info.lastInsertRowid);
     snapshotInstrument(db, sessionId, input.instrument_id);
+    // Snapshot definisi level saat sesi dibuat: mengubah instrumen belakangan
+    // tidak mengubah validasi/rekap sesi lama. Sesi lama tanpa snapshot
+    // tetap memakai level instrumen saat ini (fallback di query).
+    if (input.instrument_id) {
+      const inst = db.query("SELECT levels FROM instruments WHERE id = ?").get(input.instrument_id) as any;
+      if (inst) db.query("UPDATE sessions SET levels_snapshot = ? WHERE id = ?").run(inst.levels, sessionId);
+    }
     return sessionId;
   });
   return tx() as number;

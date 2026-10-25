@@ -3,7 +3,15 @@
 // dari database lalu memanggil fungsi di sini.
 // Sesuai implementation_plan.md bagian 6.
 
-export type Level = { v: number; label: string };
+/**
+ * Level instrumen. Bentuk lama hanya v + label (v sekaligus skor).
+ * Bentuk rubrik pola Aspro menambah min/max/def: v adalah POSISI tingkat
+ * yang diklik (mis. 1=Kurang, 2=Cukup, 3=Kompak, 4=Sangat), sedangkan
+ * skor yang disimpan adalah bilangan bulat yang diketik di dalam
+ * rentang min..max (kosong -> def). Deskriptor per kriteria tetap
+ * memakai kunci v ini.
+ */
+export type Level = { v: number; label: string; min?: number; max?: number; def?: number };
 
 export function parseLevels(raw: string | null | undefined): Level[] {
   if (!raw) return [];
@@ -12,10 +20,42 @@ export function parseLevels(raw: string | null | undefined): Level[] {
     if (!Array.isArray(arr)) return [];
     return arr
       .filter((x) => x && typeof x.v === "number" && typeof x.label === "string")
-      .map((x) => ({ v: x.v, label: x.label }));
+      .map((x) => ({
+        v: x.v,
+        label: x.label,
+        ...(typeof x.min === "number" && Number.isFinite(x.min) ? { min: x.min } : {}),
+        ...(typeof x.max === "number" && Number.isFinite(x.max) ? { max: x.max } : {}),
+        ...(typeof x.def === "number" && Number.isFinite(x.def) ? { def: x.def } : {}),
+      }));
   } catch {
     return [];
   }
+}
+
+/** Benar bila setidaknya satu level memakai rentang min/max (pola Aspro). */
+export function hasRanges(levels: Level[]): boolean {
+  return levels.some((l) => typeof l.min === "number" && typeof l.max === "number");
+}
+
+/** Validasi definisi level: bila satu level memakai rentang, semua wajib memakai rentang + def. */
+export function validateLevels(levels: Level[]): string | null {
+  if (!levels.length) return null;
+  const vs = new Set<number>();
+  for (const l of levels) {
+    if (vs.has(l.v)) return `Nilai posisi level ${l.v} duplikat.`;
+    vs.add(l.v);
+  }
+  const anyRange = hasRanges(levels);
+  if (!anyRange) return null;
+  for (const l of levels) {
+    if (typeof l.min !== "number" || typeof l.max !== "number" || typeof l.def !== "number") {
+      return `Level "${l.label}" harus punya min, max, dan def karena level lain memakai rentang.`;
+    }
+    if (l.min > l.def || l.def > l.max) {
+      return `Level "${l.label}": def (${l.def}) harus berada di dalam rentang ${l.min}–${l.max}.`;
+    }
+  }
+  return null;
 }
 
 export function labelFor(levels: Level[], value: number): string {
@@ -26,6 +66,22 @@ export function labelFor(levels: Level[], value: number): string {
 export function maxLevel(levels: Level[], fallback = 4): number {
   if (!levels.length) return fallback;
   return Math.max(...levels.map((l) => l.v));
+}
+
+/**
+ * Penyebut rekap (skala): bila level memakai rentang, skala adalah
+ * nilai max terbesar (mis. 100 untuk rentang 0–100); bila tidak,
+ * penyebut lama, yaitu nilai v terbesar.
+ */
+export function scaleForLevels(levels: Level[], fallback = 4): number {
+  if (!levels.length) return fallback;
+  if (hasRanges(levels)) return Math.max(...levels.map((l) => (typeof l.max === "number" ? l.max : 0)));
+  return maxLevel(levels, fallback);
+}
+
+/** Level yang rentangnya memuat suatu nilai (untuk narasi dari rata-rata). */
+export function levelForValueInRange(levels: Level[], value: number): Level | null {
+  return levels.find((l) => typeof l.min === "number" && typeof l.max === "number" && value >= l.min && value <= l.max) || null;
 }
 
 export type ScoredItem = { value: number; weight: number };
@@ -53,9 +109,11 @@ export function fmt(n: number | null, digits = 2): string {
   return s === "" ? "0" : s;
 }
 
-/** Format ganda yang selalu dipakai di rekap: "3,25 dari 4 (81 dari 100)". */
+/** Format ganda yang selalu dipakai di rekap: "3,25 dari 4 (81 dari 100)".
+ * Bila penyebutnya sudah 100, cukup "85 dari 100" (tanpa pengulangan). */
 export function fmtDual(score: number | null, maxLvl: number): string {
   if (score === null) return "—";
+  if (maxLvl === 100) return `${fmt(score)} dari 100`;
   const p = to100(score, maxLvl);
   return `${fmt(score)} dari ${fmt(maxLvl, 0)} (${p === null ? "—" : Math.round(p)} dari 100)`;
 }

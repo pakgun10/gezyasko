@@ -26,8 +26,8 @@ import {
 } from "./auth";
 import { esc, layout, field, input, select, csrfInput, table, backLink } from "./views";
 import { createSession, snapshotInstrument, audit, seedTemplates } from "./db";
-import { parseLevels, fmt, fmtDual, trendSvg, trendPoints } from "./lib/scores";
-import { validateScore, parseScoreInput, effectiveLevels } from "./lib/validate";
+import { parseLevels, hasRanges, scaleForLevels, validateLevels, levelForValueInRange, fmt, fmtDual, trendSvg, trendPoints } from "./lib/scores";
+import { validateScore, parseScoreInput, effectiveLevels, resolveRubricScore } from "./lib/validate";
 import { parseCSV, tableFromCSV, validateStudentRows, validateTeacherRows, validateGroupRows } from "./lib/csv";
 import { importStudents, importTeachers, importGroups } from "./lib/imports";
 import { generateNarrative } from "./lib/narrative";
@@ -340,6 +340,7 @@ export function buildRoutes(app: Hono, s: AppState): void {
     targetName: string,
     existing: any | null,
     existingScores: Map<number, number>,
+    existingLevels: Map<number, number>,
     existingMemberNotes: Map<number, string>,
     existingEvidence: any[],
     members: any[],
@@ -352,6 +353,23 @@ export function buildRoutes(app: Hono, s: AppState): void {
         }
         const levels = effectiveLevels(cr.input_type as any, levelsRaw);
         const current = existingScores.get(Number(cr.id));
+        // Rubrik pola Aspro: tombol tingkat (rentang) + kolom angka manual.
+        // Dua datum dikirim: posisi level yang diklik + bilangan bulat yang diketik.
+        if (cr.input_type === "rubrik" && hasRanges(levels)) {
+          const currentLevel = existingLevels.get(Number(cr.id));
+          let descriptors: Record<string, string> = {};
+          try { descriptors = JSON.parse(cr.descriptors || "{}") || {}; } catch { descriptors = {}; }
+          const rubricButtons = levels
+            .map(
+              (lv) => `<label class="levelbtn"><input type="radio" name="level_${cr.id}" value="${lv.v}" data-def="${lv.def ?? ""}" data-min="${lv.min ?? ""}" data-max="${lv.max ?? ""}" ${currentLevel === lv.v ? "checked" : ""}><span>${esc(lv.label)} (${lv.min}–${lv.max})</span></label>`,
+            )
+            .join("");
+          const descHtml = levels
+            .filter((lv) => descriptors[String(lv.v)])
+            .map((lv) => `<div class="muted">${esc(lv.label)} (${lv.min}–${lv.max}): ${esc(descriptors[String(lv.v)])}</div>`)
+            .join("");
+          return `<div class="crit"><b>${esc(cr.text)}</b> <span class="muted">(bobot ${cr.weight})</span><div class="levels">${rubricButtons}<label class="levelbtn"><input type="radio" name="level_${cr.id}" value="" data-clear="1" ${currentLevel === undefined ? "checked" : ""}><span>Belum diisi</span></label></div>${descHtml}<label class="field"><span>Nilai (bilangan bulat di dalam rentang level yang diklik; kosong = nilai awal level)</span><input type="number" step="1" name="score_${cr.id}" value="${current === undefined ? "" : current}" data-rubric-score="${cr.id}"></label></div>`;
+        }
         const buttons = levels
           .map(
             (lv) =>
@@ -399,7 +417,7 @@ export function buildRoutes(app: Hono, s: AppState): void {
     const cur = requireUser(s, c);
     if (cur instanceof Response) return cur;
     const sessionId = Number(c.req.param("sessionId"));
-    const session = db().query("SELECT s.*, cl.name AS class_name, i.title AS instrument_title, i.levels AS levels_raw FROM sessions s JOIN classes cl ON cl.id = s.class_id LEFT JOIN instruments i ON i.id = s.instrument_id WHERE s.id = ?").get(sessionId) as any;
+    const session = db().query("SELECT s.*, cl.name AS class_name, i.title AS instrument_title, COALESCE(s.levels_snapshot, i.levels) AS levels_raw FROM sessions s JOIN classes cl ON cl.id = s.class_id LEFT JOIN instruments i ON i.id = s.instrument_id WHERE s.id = ?").get(sessionId) as any;
     if (!session) return errPage(s, c, cur.user, "Tidak ditemukan", "Sesi tidak ditemukan.", "/");
     if (!canAccessSession(db(), cur.user, sessionId)) return errPage(s, c, cur.user, "Tidak diizinkan", "Anda tidak berhak membuka sesi ini.", "/");
     const canRecord = canRecordSession(db(), cur.user, Number(session.class_id));
@@ -427,14 +445,18 @@ export function buildRoutes(app: Hono, s: AppState): void {
       }
       if (targetName) {
         const existingScores = new Map<number, number>();
+        const existingLevels = new Map<number, number>();
         const existingMemberNotes = new Map<number, string>();
         let existingEvidence: any[] = [];
         if (existing) {
-          for (const sc of scoresForObservation(db(), existing.id)) existingScores.set(sc.snapshotId, sc.value);
+          for (const sc of scoresForObservation(db(), existing.id)) {
+            existingScores.set(sc.snapshotId, sc.value);
+            if (typeof sc.levelV === "number") existingLevels.set(sc.snapshotId, sc.levelV);
+          }
           for (const mn of db().query("SELECT * FROM member_notes WHERE observation_id = ?").all(existing.id) as any[]) existingMemberNotes.set(Number(mn.student_id), mn.note);
           existingEvidence = db().query("SELECT * FROM evidence WHERE observation_id = ? ORDER BY id ASC").all(existing.id) as any[];
         }
-        formHtml = catatFormHtml(s, session, criteria, session.levels_raw, targetKind, targetId, targetName, existing, existingScores, existingMemberNotes, existingEvidence, members, cur.csrf);
+        formHtml = catatFormHtml(s, session, criteria, session.levels_raw, targetKind, targetId, targetName, existing, existingScores, existingLevels, existingMemberNotes, existingEvidence, members, cur.csrf);
       }
     }
     let gridHtml = "";
@@ -470,7 +492,7 @@ export function buildRoutes(app: Hono, s: AppState): void {
     const cur = requireUser(s, c);
     if (cur instanceof Response) return cur;
     const sessionId = Number(c.req.param("sessionId"));
-    const session = db().query("SELECT s.*, i.levels AS levels_raw FROM sessions s LEFT JOIN instruments i ON i.id = s.instrument_id WHERE s.id = ?").get(sessionId) as any;
+    const session = db().query("SELECT s.*, COALESCE(s.levels_snapshot, i.levels) AS levels_raw FROM sessions s LEFT JOIN instruments i ON i.id = s.instrument_id WHERE s.id = ?").get(sessionId) as any;
     if (!session) return errPage(s, c, cur.user, "Tidak ditemukan", "Sesi tidak ditemukan.", "/");
     if (!canRecordSession(db(), cur.user, Number(session.class_id))) return errPage(s, c, cur.user, "Tidak diizinkan", "Anda tidak berhak mencatat pada sesi ini.", "/");
     const body = await formOf(c);
@@ -480,16 +502,30 @@ export function buildRoutes(app: Hono, s: AppState): void {
     const observationIdRaw = str(body, "observation_id");
     const note = str(body, "note");
     const criteria = criteriaForSession(db(), sessionId);
-    // Validasi skor
-    const scoreValues = new Map<number, number>();
+    // Validasi skor. Rubrik pola Aspro mengirim dua datum: posisi level
+    // yang diklik (level_) + bilangan bulat yang diketik (score_).
+    const scoreValues = new Map<number, { value: number; level: number | null }>();
     for (const cr of criteria) {
       if (cr.input_type === "teks") continue;
+      const levels = parseLevels(session.levels_raw);
+      if (cr.input_type === "rubrik" && hasRanges(levels)) {
+        const levelRaw = str(body, `level_${cr.id}`);
+        const levelV = levelRaw === "" ? null : Number(levelRaw);
+        const scoreRaw = str(body, `score_${cr.id}`);
+        const scoreVal = parseScoreInput(scoreRaw === "" ? null : scoreRaw);
+        const resolved = resolveRubricScore(Number.isFinite(levelV as number) ? (levelV as number) : null, scoreVal, session.levels_raw);
+        if (resolved && "error" in resolved) {
+          return errPage(s, c, cur.user, "Nilai tidak valid", `${cr.text}: ${resolved.error}`, `/catat/${sessionId}`);
+        }
+        if (resolved) scoreValues.set(Number(cr.id), { value: resolved.value, level: resolved.level });
+        continue;
+      }
       const raw = str(body, `score_${cr.id}`);
       const val = parseScoreInput(raw === "" ? null : raw);
       if (val !== null) {
         const err = validateScore(cr.input_type as any, val, session.levels_raw);
         if (err) return errPage(s, c, cur.user, "Nilai tidak valid", `${cr.text}: ${err}`, `/catat/${sessionId}`);
-        scoreValues.set(Number(cr.id), val);
+        scoreValues.set(Number(cr.id), { value: val, level: cr.input_type === "rubrik" ? val : null });
       }
     }
     // Validasi target
@@ -534,8 +570,8 @@ export function buildRoutes(app: Hono, s: AppState): void {
             : db().query("INSERT INTO observations (session_id, student_id, group_id, note) VALUES (?, NULL, ?, ?)").run(sessionId, targetId, note || null);
         obsId = Number(info.lastInsertRowid);
       }
-      for (const [snapId, val] of scoreValues) {
-        db().query("INSERT INTO scores (observation_id, snapshot_criterion_id, value) VALUES (?, ?, ?)").run(obsId, snapId, val);
+      for (const [snapId, sc] of scoreValues) {
+        db().query("INSERT INTO scores (observation_id, snapshot_criterion_id, value, level_v) VALUES (?, ?, ?, ?)").run(obsId, snapId, sc.value, sc.level);
       }
       if (targetKind === "kelompok") {
         const members = db().query("SELECT student_id FROM group_members WHERE group_id = ?").all(targetId) as any[];
@@ -598,6 +634,7 @@ export function buildRoutes(app: Hono, s: AppState): void {
       ${field("Judul instrumen (bebas)", input("title", "", "required"))}
       ${field("Jenis", select("kind", ["rubrik", "checklist", "skala", "anekdotal", "gabungan"].map((k) => ({ value: k, label: k }))))}
       ${field("Level (JSON, mis. [{\"v\":1,\"label\":\"Belum muncul\"},{\"v\":2,\"label\":\"Mulai muncul\"}])", `<textarea name="levels" rows="4">[{"v":1,"label":"Belum muncul"},{"v":2,"label":"Mulai muncul"},{"v":3,"label":"Berkembang sesuai harapan"},{"v":4,"label":"Membudaya"}]</textarea>`)}
+      <p class="muted">Rubrik pola Aspro: tiap level boleh memakai rentang + nilai awal, mis. [{"v":1,"label":"Kurang kompak","min":0,"max":64,"def":50},{"v":2,"label":"Cukup kompak","min":65,"max":77,"def":71},{"v":3,"label":"Kompak","min":78,"max":89,"def":84},{"v":4,"label":"Sangat kompak","min":90,"max":100,"def":95}]. Bila satu level memakai rentang, semua level wajib memakai rentang dan nilai awal.</p>
       ${field("Visibilitas", select("visibility", [{ value: "private", label: "Pribadi" }, { value: "sekolah", label: "Sekolah (semua guru)" }]))}
       <button class="btn" type="submit">Simpan & kelola kriteria</button>
     </form>`;
@@ -617,6 +654,8 @@ export function buildRoutes(app: Hono, s: AppState): void {
     try {
       const parsed = JSON.parse(strRaw(body, "levels") || "[]");
       if (!Array.isArray(parsed)) throw new Error("bukan array");
+      const lvlErr = validateLevels(parseLevels(JSON.stringify(parsed)));
+      if (lvlErr) return redirectMsg(c, "/instrumen/baru", lvlErr);
       levels = JSON.stringify(parsed);
     } catch {
       return redirectMsg(c, "/instrumen/baru", "Level harus berupa JSON array yang valid.");
@@ -684,6 +723,8 @@ export function buildRoutes(app: Hono, s: AppState): void {
     try {
       const parsed = JSON.parse(strRaw(body, "levels") || "[]");
       if (!Array.isArray(parsed)) throw new Error("bukan array");
+      const lvlErr = validateLevels(parseLevels(JSON.stringify(parsed)));
+      if (lvlErr) return redirectMsg(c, `/instrumen/${id}/edit`, lvlErr);
       levels = JSON.stringify(parsed);
     } catch {
       return redirectMsg(c, `/instrumen/${id}/edit`, "Level harus berupa JSON array yang valid.");
@@ -937,7 +978,7 @@ export function buildRoutes(app: Hono, s: AppState): void {
       const critForNarr: any[] = [];
       // Deskriptor diambil dari kriteria snapshot terakhir per teks kriteria
       for (const pc of recap.perCriterion) {
-        const row = db().query("SELECT sc.descriptors, i.levels FROM session_criteria sc JOIN sessions s ON s.id = sc.session_id LEFT JOIN instruments i ON i.id = s.instrument_id WHERE sc.text = ? ORDER BY sc.id DESC LIMIT 1").get(pc.text) as any;
+        const row = db().query("SELECT sc.descriptors, COALESCE(s.levels_snapshot, i.levels) AS levels FROM session_criteria sc JOIN sessions s ON s.id = sc.session_id LEFT JOIN instruments i ON i.id = s.instrument_id WHERE sc.text = ? ORDER BY sc.id DESC LIMIT 1").get(pc.text) as any;
         let descriptor: string | null = null;
         let levels: any[] = [];
         try { levels = row?.levels ? JSON.parse(row.levels) : []; } catch { levels = []; }
@@ -945,7 +986,11 @@ export function buildRoutes(app: Hono, s: AppState): void {
         if (row?.descriptors && avg !== null) {
           try {
             const d = JSON.parse(row.descriptors);
-            const nearest = levels.length ? levels.reduce((a: any, b: any) => (Math.abs(b.v - avg) < Math.abs(a.v - avg) ? b : a)) : null;
+            // Rubrik rentang: deskriptor dari level yang rentangnya memuat
+            // rata-rata (mis. rata-rata 86 -> Kompak 78–89); bila tidak,
+            // jatuh ke level terdekat seperti sebelumnya.
+            const inRange = levelForValueInRange(parseLevels(row.levels), avg);
+            const nearest = inRange || (levels.length ? levels.reduce((a: any, b: any) => (Math.abs(b.v - avg) < Math.abs(a.v - avg) ? b : a)) : null);
             descriptor = nearest ? d[String(nearest.v)] || null : null;
           } catch { descriptor = null; }
         }

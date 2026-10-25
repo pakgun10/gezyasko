@@ -6,6 +6,7 @@ import {
   observationScore,
   to100,
   parseLevels,
+  scaleForLevels,
   labelFor,
   criterionAverages,
   goalScore,
@@ -37,7 +38,7 @@ export function fetchObservationsForStudent(db: Database, studentId: number): Ra
   const rows = db
     .query(
       `SELECT o.id, o.session_id, o.student_id, o.group_id, o.note,
-              s.activity, s.observed_at, s.scope, i.title AS instrument_title, i.levels AS levels_raw,
+              s.activity, s.observed_at, s.scope, i.title AS instrument_title, COALESCE(s.levels_snapshot, i.levels) AS levels_raw,
               g.name AS group_name, s.class_id, c.period_id, p.name AS period_name
        FROM observations o
        JOIN sessions s ON s.id = o.session_id
@@ -53,10 +54,10 @@ export function fetchObservationsForStudent(db: Database, studentId: number): Ra
   return rows as RawObservation[];
 }
 
-export function scoresForObservation(db: Database, observationId: number): { snapshotId: number; value: number; weight: number; text: string; goalId: number | null; inputType: string }[] {
+export function scoresForObservation(db: Database, observationId: number): { snapshotId: number; value: number; levelV: number | null; weight: number; text: string; goalId: number | null; inputType: string }[] {
   return db
     .query(
-      `SELECT sc.id AS snapshotId, sc.weight, sc.text, sc.goal_id AS goalId, sc.input_type AS inputType, s.value
+      `SELECT sc.id AS snapshotId, sc.weight, sc.text, sc.goal_id AS goalId, sc.input_type AS inputType, s.value, s.level_v AS levelV
        FROM scores s JOIN session_criteria sc ON sc.id = s.snapshot_criterion_id
        WHERE s.observation_id = ? ORDER BY sc.sort ASC, sc.id ASC`,
     )
@@ -73,7 +74,9 @@ export function expandObservations(db: Database, raw: RawObservation[]): Expande
     const scored = scoresForObservation(db, r.id);
     const crit = criteriaForSession(db, r.session_id);
     const levels = parseLevels(r.levels_raw);
-    const maxLvl = levels.length ? Math.max(...levels.map((l) => l.v)) : 4;
+    // Penyebut: skala rentang bila level memakai rentang (mis. 100),
+    // bila tidak penyebut lama (nilai v terbesar).
+    const maxLvl = scaleForLevels(levels, 4);
     const score = observationScore(scored);
     const complete = crit.filter((c) => c.input_type !== "teks").every((c) => scored.some((s) => s.snapshotId === c.id));
     out.push({
@@ -121,7 +124,10 @@ export function studentRecap(db: Database, studentId: number, periodId: number |
     for (const s of scored) {
       const c = crit.find((x) => x.id === s.snapshotId);
       const eff = effectiveLevels(s.inputType as any, r.levels_raw);
-      entries.push({ snapshotId: s.snapshotId, text: s.text, goalId: s.goalId, value: s.value, label: labelFor(eff, s.value) });
+      // Label dari posisi level yang diklik (bila tersimpan), bukan dari
+      // nilai bulatnya: 85 tidak sama dengan posisi level mana pun.
+      const labelKey = typeof s.levelV === "number" ? s.levelV : s.value;
+      entries.push({ snapshotId: s.snapshotId, text: s.text, goalId: s.goalId, value: s.value, label: labelFor(eff, labelKey) });
       goalEntries.push({ goalId: s.goalId, value: s.value, weight: s.weight });
       if (c) critLevels.set(s.snapshotId, { levels: eff, text: s.text });
     }
