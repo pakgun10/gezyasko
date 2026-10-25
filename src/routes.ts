@@ -200,6 +200,24 @@ export function buildRoutes(app: Hono, s: AppState): void {
     if (cur instanceof Response) return cur;
     const u = cur.user;
     let body = "";
+    // Instrumen terbaru: tabel instruments tidak punya created_at, jadi
+    // "terbaru" = id terbesar. Hanya admin dan guru (pengamat tidak
+    // mengelola instrumen). Tanpa kolom Status Aktif karena instrumen
+    // memang tidak punya field status; aksi mengikuti hak: Edit untuk
+    // admin/pemilik, Salin untuk instrumen sekolah milik guru lain.
+    const recentInstruments = isAdmin(u)
+      ? (db().query("SELECT * FROM instruments ORDER BY id DESC LIMIT 5").all() as any[])
+      : u.role === "guru"
+        ? (db().query("SELECT * FROM instruments WHERE owner_id = ? OR visibility = 'sekolah' OR is_template = 1 ORDER BY id DESC LIMIT 5").all(u.id) as any[])
+        : [];
+    const recentSection =
+      isAdmin(u) || u.role === "guru"
+        ? `<h2>Instrumen terbaru</h2>${
+            recentInstruments.length
+              ? `${table(["Judul", "Jenis", "Templat?", "Aksi"], recentInstruments.map((i) => [esc(i.title), esc(i.kind), i.is_template ? "Ya" : "Tidak", isAdmin(u) || Number(i.owner_id) === u.id ? `<a href="/instrumen/${i.id}/edit">Edit</a>` : `<form method="post" action="/instrumen/${i.id}/salin" class="inline">${csrfInput(cur.csrf)}<button class="linkbtn" type="submit">Salin</button></form>`]))}<p><a href="/instrumen">Lihat semua instrumen</a></p>`
+              : `<p class="muted">Belum ada instrumen. <a href="/instrumen/baru">Buat instrumen</a></p>`
+          }`
+        : "";
     if (isAdmin(u)) {
       const counts = {
         guru: (db().query("SELECT COUNT(*) c FROM users WHERE role='guru'").get() as any).c,
@@ -214,6 +232,7 @@ export function buildRoutes(app: Hono, s: AppState): void {
         <div class="stat"><span class="stat-icon">🏫</span><div><b>${counts.kelas}</b><span>Kelas</span></div></div>
         <div class="stat"><span class="stat-icon">📋</span><div><b>${counts.sesi}</b><span>Sesi observasi</span></div></div></div>
         <p><a class="btn" href="/admin">Buka Admin</a> <a class="btn secondary" href="/instrumen">Instrumen</a></p>
+        ${recentSection}
         <h2>Daftar kelas</h2>
         <ul>${classes.map((cl) => `<li><a href="/kelas/${cl.id}">${esc(cl.name)}</a> ${cl.level_label ? `(${esc(cl.level_label)})` : ""} — ${esc(cl.period_name || "")}</li>`).join("") || "<li>Belum ada kelas.</li>"}</ul>`;
     } else if (u.role === "guru") {
@@ -229,6 +248,7 @@ export function buildRoutes(app: Hono, s: AppState): void {
         return `<li><a href="/kelas/${cl.id}">${esc(cl.name)}</a> — ${obs}/${total} murid sudah diamati (termasuk lewat kelompok) · <a href="/rekap/kelas/${cl.id}">Rekap</a></li>`;
       }).join("") || "<li>Belum ada kelas yang diampu. Minta admin menugaskan Anda ke kelas.</li>"}</ul>
         <h2>Sesi terakhir</h2><ul>${sessions.map((ss) => `<li><a href="/catat/${ss.id}">${esc(ss.activity || "Observasi")}</a> — ${esc(ss.class_name)} — ${esc(ss.observed_at)} (${esc(ss.scope)})</li>`).join("") || "<li>Belum ada sesi.</li>"}</ul>
+        ${recentSection}
         <p><a class="btn" href="/instrumen">Instrumen</a></p>`;
     } else if (isKepsek(u)) {
       const classes = db().query("SELECT cl.*, p.name AS period_name FROM classes cl LEFT JOIN periods p ON p.id = cl.period_id ORDER BY cl.id DESC").all() as any[];
